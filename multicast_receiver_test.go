@@ -18,6 +18,11 @@ func TestValidateIPv4MulticastFlow(t *testing.T) {
 		netip.MustParseAddr("239.192.74.99"),
 		5000,
 	))
+	require.NoError(t, validateIPv4MulticastFlow(
+		netip.IPv4Unspecified(),
+		netip.MustParseAddr("239.192.74.99"),
+		5000,
+	))
 
 	testCases := []struct {
 		name   string
@@ -34,6 +39,12 @@ func TestValidateIPv4MulticastFlow(t *testing.T) {
 		{
 			name:   "multicast source",
 			source: netip.MustParseAddr("232.0.0.1"),
+			group:  validGroup,
+			port:   5000,
+		},
+		{
+			name:   "unspecified SSM source",
+			source: netip.IPv4Unspecified(),
 			group:  validGroup,
 			port:   5000,
 		},
@@ -84,6 +95,11 @@ func TestValidateIPv6MulticastFlow(t *testing.T) {
 		netip.MustParseAddr("ff3e::8000:1234"),
 		4434,
 	))
+	require.NoError(t, validateIPv6MulticastFlow(
+		netip.IPv6Unspecified(),
+		netip.MustParseAddr("ff3e:30:3ffe:ffff:1::4"),
+		4434,
+	))
 
 	testCases := []struct {
 		name   string
@@ -101,6 +117,12 @@ func TestValidateIPv6MulticastFlow(t *testing.T) {
 			name:   "multicast source",
 			source: netip.MustParseAddr("ff1e::1"),
 			group:  netip.MustParseAddr("ff3e:30:3ffe:ffff:1::4"),
+			port:   4434,
+		},
+		{
+			name:   "unspecified SSM source",
+			source: netip.IPv6Unspecified(),
+			group:  netip.MustParseAddr("ff3e::8000:1234"),
 			port:   4434,
 		},
 		{
@@ -144,6 +166,18 @@ func TestIPv6MulticastGroupMode(t *testing.T) {
 	require.False(t, isIPv6SSMGroup(netip.MustParseAddr("ff3e:30:3ffe:ffff:1::4")))
 	require.False(t, isIPv6SSMGroup(netip.MustParseAddr("ff1e::8000:1234")))
 	require.False(t, isIPv6SSMGroup(netip.MustParseAddr("2001:db8::1")))
+}
+
+func TestMulticastInterfaceRouteTarget(t *testing.T) {
+	ipv4Source := netip.MustParseAddr("192.0.2.1")
+	ipv4Group := netip.MustParseAddr("239.192.74.99")
+	require.Equal(t, ipv4Source, multicastInterfaceRouteTarget(ipv4Source, ipv4Group))
+	require.Equal(t, ipv4Group, multicastInterfaceRouteTarget(netip.IPv4Unspecified(), ipv4Group))
+
+	ipv6Source := netip.MustParseAddr("2001:db8::1")
+	ipv6Group := netip.MustParseAddr("ff3e:30:3ffe:ffff:1::4")
+	require.Equal(t, ipv6Source, multicastInterfaceRouteTarget(ipv6Source, ipv6Group))
+	require.Equal(t, ipv6Group, multicastInterfaceRouteTarget(netip.IPv6Unspecified(), ipv6Group))
 }
 
 func TestFindInterfaceByIPv4(t *testing.T) {
@@ -262,7 +296,7 @@ func TestMulticastPacketMatches(t *testing.T) {
 	require.True(t, multicastPacketMatches(
 		&net.UDPAddr{IP: net.ParseIP("192.0.2.11"), Port: 4433},
 		net.ParseIP(asmGroup.String()),
-		source,
+		netip.IPv4Unspecified(),
 		asmGroup,
 		false,
 	))
@@ -270,6 +304,20 @@ func TestMulticastPacketMatches(t *testing.T) {
 		&net.UDPAddr{IP: net.ParseIP("192.0.2.11"), Port: 4433},
 		net.ParseIP("239.192.74.100"),
 		source,
+		asmGroup,
+		false,
+	))
+	require.False(t, multicastPacketMatches(
+		&net.UDPAddr{IP: net.ParseIP("2001:db8::1"), Port: 4433},
+		net.ParseIP(asmGroup.String()),
+		netip.IPv4Unspecified(),
+		asmGroup,
+		false,
+	))
+	require.False(t, multicastPacketMatches(
+		&net.UDPAddr{IP: net.IPv4zero, Port: 4433},
+		net.ParseIP(asmGroup.String()),
+		netip.IPv4Unspecified(),
 		asmGroup,
 		false,
 	))

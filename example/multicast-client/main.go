@@ -1,5 +1,5 @@
 // The multicast-client example receives experimental minimal multicast QUIC
-// DATAGRAMs and prints them to standard output.
+// DATAGRAMs and either prints them or displays RTP/H.264 video using ffplay.
 package main
 
 import (
@@ -19,11 +19,25 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	interfaceName := flag.String("interface", "", "multicast receive interface name (default: route to source)")
 	serverName := flag.String("server-name", "", "TLS server name (default: hostname from address)")
 	insecure := flag.Bool("insecure", false, "skip TLS certificate verification")
 	raw := flag.Bool("raw", false, "write raw DATAGRAM payloads instead of one hex value per line")
 	debug := flag.Bool("debug", false, "print secret-safe QUIC and multicast diagnostics to stderr")
+	display := flag.Bool("display", false, "decode and display RTP/H.264 DATAGRAMs using ffplay")
+	ffplayExecutable := flag.String("ffplay", "ffplay", "ffplay executable used by -display")
+	rtpPayloadType := flag.Uint("rtp-payload-type", defaultRTPPayloadType, "RTP payload type used by -display")
+	spropParameterSets := flag.String(
+		"h264-sprop-parameter-sets",
+		"",
+		"optional base64 SPS,PPS value from SDP sprop-parameter-sets",
+	)
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [flags] host:port\n", os.Args[0])
 		flag.PrintDefaults()
@@ -33,9 +47,21 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+	if *display && *raw {
+		return errors.New("-display and -raw cannot be used together")
+	}
+	if *rtpPayloadType > 127 {
+		return fmt.Errorf("RTP payload type must be between 0 and 127: %d", *rtpPayloadType)
+	}
+	keepAlivePeriod := time.Duration(0)
+	if *display {
+		keepAlivePeriod = displayKeepAlivePeriod
+	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
 
 	var (
 		debugLogger *log.Logger
@@ -51,6 +77,12 @@ func main() {
 			*interfaceName,
 			*insecure,
 			*serverName,
+		)
+		debugLogger.Printf(
+			"display=%t rtp_payload_type=%d keep_alive=%s",
+			*display,
+			*rtpPayloadType,
+			keepAlivePeriod,
 		)
 		if resolved, err := net.ResolveUDPAddr("udp", flag.Arg(0)); err != nil {
 			debugLogger.Printf("address resolution failed: %v", err)
@@ -75,6 +107,37 @@ func main() {
 		}
 	}
 
+	var player *rtpPlayer
+	if *display {
+		var err error
+		player, err = startRTPPlayer(ctx, rtpPlayerOptions{
+			Executable:         *ffplayExecutable,
+			PayloadType:        uint8(*rtpPayloadType),
+			SpropParameterSets: *spropParameterSets,
+			FFplayStderr:       os.Stderr,
+		})
+		if err != nil {
+			return err
+		}
+		defer player.Close()
+		log.Printf(
+			"displaying RTP/H.264 payload type %d via %s on 127.0.0.1:%d",
+			*rtpPayloadType,
+			player.executable,
+			player.port,
+		)
+		if *spropParameterSets == "" {
+			log.Printf("display is waiting for in-band H.264 SPS/PPS")
+		}
+		go func() {
+			select {
+			case <-player.Done():
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+
 	tlsConfig := &tls.Config{
 		NextProtos:         []string{"mc-quic"},
 		ServerName:         *serverName,
@@ -83,6 +146,9 @@ func main() {
 	quicConfig := &quic.Config{
 		EnableMulticast:    true,
 		MulticastInterface: *interfaceName,
+	}
+	if *display {
+		quicConfig.KeepAlivePeriod = keepAlivePeriod
 	}
 	if *debug {
 		quicConfig.Tracer = newDebugConnectionTracer(debugLogger, status)
@@ -101,7 +167,22 @@ func main() {
 				err,
 			)
 		}
-		log.Fatal(err)
+		if errors.Is(err, context.Canceled) {
+			if signalCtx.Err() != nil {
+				return nil
+			}
+			if player != nil {
+				select {
+				case <-player.Done():
+					if playerErr := player.WaitError(); playerErr != nil {
+						return fmt.Errorf("ffplay exited before the QUIC handshake completed: %w", playerErr)
+					}
+					return nil
+				default:
+				}
+			}
+		}
+		return err
 	}
 	defer conn.CloseWithError(0, "")
 	if *debug {
@@ -126,7 +207,20 @@ func main() {
 				if *debug {
 					debugLogger.Printf("stopped by interrupt status={%s}", status)
 				}
-				return
+				if signalCtx.Err() != nil {
+					return nil
+				}
+				if player != nil {
+					select {
+					case <-player.Done():
+						if playerErr := player.WaitError(); playerErr != nil {
+							return fmt.Errorf("ffplay exited: %w", playerErr)
+						}
+						return nil
+					default:
+					}
+				}
+				return nil
 			}
 			if *debug {
 				debugLogger.Printf(
@@ -135,14 +229,45 @@ func main() {
 					err,
 				)
 			}
-			log.Fatal(err)
+			return err
 		}
 		if *debug {
 			debugLogger.Printf("application received multicast DATAGRAM payload_bytes=%d", len(datagram))
 		}
+		if player != nil {
+			info, err := parseRTPPacket(datagram, uint8(*rtpPayloadType))
+			if err != nil {
+				if *debug {
+					debugLogger.Printf(
+						"display dropped non-RTP DATAGRAM payload_bytes=%d error=%v",
+						len(datagram),
+						err,
+					)
+				}
+				continue
+			}
+			if *debug {
+				nalTypes, nalErr := h264NALTypes(info.Payload)
+				debugLogger.Printf(
+					"RTP/H.264 sequence=%d timestamp=%d marker=%t payload_type=%d ssrc=%#x payload_bytes=%d nal_types=%s nal_error=%v",
+					info.Sequence,
+					info.Timestamp,
+					info.Marker,
+					info.PayloadType,
+					info.SSRC,
+					len(info.Payload),
+					formatNALTypes(nalTypes),
+					nalErr,
+				)
+			}
+			if err := player.WriteRTP(datagram); err != nil {
+				return err
+			}
+			continue
+		}
 		if *raw {
 			if _, err := os.Stdout.Write(datagram); err != nil {
-				log.Fatal(err)
+				return err
 			}
 			continue
 		}

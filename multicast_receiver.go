@@ -49,9 +49,6 @@ func validateIPv4MulticastFlow(source, group netip.Addr, port uint16) error {
 	if !source.IsValid() || !source.Is4() {
 		return fmt.Errorf("multicast source must be an IPv4 address")
 	}
-	if !isUsableMulticastSource(source) {
-		return fmt.Errorf("invalid multicast source address: %s", source)
-	}
 	if !group.IsValid() || !group.Is4() || !group.IsMulticast() {
 		return fmt.Errorf("multicast group must be an IPv4 multicast address")
 	}
@@ -60,6 +57,10 @@ func validateIPv4MulticastFlow(source, group netip.Addr, port uint16) error {
 	}
 	if group.As4() == [4]byte{232, 0, 0, 0} {
 		return fmt.Errorf("multicast group must not be the reserved address 232.0.0.0")
+	}
+	if !isUsableMulticastSource(source) &&
+		!(source.IsUnspecified() && !isIPv4SSMGroup(group)) {
+		return fmt.Errorf("invalid multicast source address: %s", source)
 	}
 	if port == 0 {
 		return fmt.Errorf("multicast UDP port must not be 0")
@@ -71,11 +72,12 @@ func validateIPv6MulticastFlow(source, group netip.Addr, port uint16) error {
 	if !source.IsValid() || !source.Is6() || source.Is4In6() {
 		return fmt.Errorf("multicast source must be an IPv6 address")
 	}
-	if !isUsableMulticastSource(source) {
-		return fmt.Errorf("invalid multicast source address: %s", source)
-	}
 	if !isSupportedIPv6MulticastGroup(group) {
 		return fmt.Errorf("multicast group must be a supported IPv6 multicast address")
+	}
+	if !isUsableMulticastSource(source) &&
+		!(source.IsUnspecified() && !isIPv6SSMGroup(group)) {
+		return fmt.Errorf("invalid multicast source address: %s", source)
 	}
 	if port == 0 {
 		return fmt.Errorf("multicast UDP port must not be 0")
@@ -148,7 +150,10 @@ func isSupportedIPv6MulticastGroup(group netip.Addr) bool {
 	return false
 }
 
-func selectIPv4MulticastInterface(source netip.Addr, interfaceName string) (*net.Interface, netip.Addr, error) {
+func selectIPv4MulticastInterface(
+	source, group netip.Addr,
+	interfaceName string,
+) (*net.Interface, netip.Addr, error) {
 	if interfaceName != "" {
 		iface, err := net.InterfaceByName(interfaceName)
 		if err != nil {
@@ -164,7 +169,7 @@ func selectIPv4MulticastInterface(source netip.Addr, interfaceName string) (*net
 		return iface, local, nil
 	}
 
-	local, err := probeIPv4Route(source)
+	local, err := probeIPv4Route(multicastInterfaceRouteTarget(source, group))
 	if err != nil {
 		return nil, netip.Addr{}, err
 	}
@@ -181,7 +186,7 @@ func selectIPv4MulticastInterface(source netip.Addr, interfaceName string) (*net
 }
 
 func selectIPv6MulticastInterface(
-	source netip.Addr,
+	source, group netip.Addr,
 	interfaceName string,
 ) (*net.Interface, netip.Addr, error) {
 	if interfaceName != "" {
@@ -195,7 +200,7 @@ func selectIPv6MulticastInterface(
 		return iface, netip.Addr{}, nil
 	}
 
-	local, err := probeIPv6Route(source)
+	local, err := probeIPv6Route(multicastInterfaceRouteTarget(source, group))
 	if err != nil {
 		return nil, netip.Addr{}, err
 	}
@@ -211,6 +216,13 @@ func selectIPv6MulticastInterface(
 	return iface, local, nil
 }
 
+func multicastInterfaceRouteTarget(source, group netip.Addr) netip.Addr {
+	if source.IsUnspecified() {
+		return group
+	}
+	return source
+}
+
 func validateMulticastInterface(iface *net.Interface) error {
 	if iface == nil {
 		return errors.New("multicast interface is nil")
@@ -224,14 +236,14 @@ func validateMulticastInterface(iface *net.Interface) error {
 	return nil
 }
 
-func probeIPv4Route(source netip.Addr) (netip.Addr, error) {
+func probeIPv4Route(target netip.Addr) (netip.Addr, error) {
 	conn, err := net.DialUDP(
 		"udp4",
 		nil,
-		&net.UDPAddr{IP: net.IP(source.Unmap().AsSlice()), Port: 9},
+		&net.UDPAddr{IP: net.IP(target.Unmap().AsSlice()), Port: 9},
 	)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("probing route to multicast source %s: %w", source, err)
+		return netip.Addr{}, fmt.Errorf("probing route to multicast interface hint %s: %w", target, err)
 	}
 	defer conn.Close()
 
@@ -246,18 +258,18 @@ func probeIPv4Route(source netip.Addr) (netip.Addr, error) {
 	return addr.Unmap(), nil
 }
 
-func probeIPv6Route(source netip.Addr) (netip.Addr, error) {
-	source = source.Unmap()
-	if !source.Is6() || source.Is4In6() {
-		return netip.Addr{}, fmt.Errorf("IPv6 route probe requires an IPv6 source address")
+func probeIPv6Route(target netip.Addr) (netip.Addr, error) {
+	target = target.Unmap()
+	if !target.Is6() || target.Is4In6() {
+		return netip.Addr{}, fmt.Errorf("IPv6 route probe requires an IPv6 interface hint")
 	}
 	conn, err := net.DialUDP(
 		"udp6",
 		nil,
-		&net.UDPAddr{IP: net.IP(source.AsSlice()), Port: 9},
+		&net.UDPAddr{IP: net.IP(target.AsSlice()), Port: 9},
 	)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("probing route to multicast source %s: %w", source, err)
+		return netip.Addr{}, fmt.Errorf("probing route to multicast interface hint %s: %w", target, err)
 	}
 	defer conn.Close()
 

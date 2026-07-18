@@ -215,10 +215,10 @@ func TestMCFlowFrameRejectsInvalidSourceAddresses(t *testing.T) {
 		group     string
 	}{
 		{
-			name:      "IPv4 unspecified",
+			name:      "IPv4 unspecified for SSM",
 			ipVersion: 4,
 			source:    "0.0.0.0",
-			group:     "239.192.74.99",
+			group:     "232.1.2.3",
 		},
 		{
 			name:      "IPv4 multicast",
@@ -258,6 +258,7 @@ func TestMCFlowFrameRejectsInvalidSourceAddresses(t *testing.T) {
 
 func TestMCFlowFrameAllowsIPv4ASMGroup(t *testing.T) {
 	frame := newIPv4MCFlowFrame()
+	frame.SourceAddress = netip.IPv4Unspecified()
 	frame.GroupAddress = netip.MustParseAddr("239.192.74.99")
 	b, err := frame.Append(nil, protocol.Version1)
 	require.NoError(t, err)
@@ -265,6 +266,7 @@ func TestMCFlowFrameAllowsIPv4ASMGroup(t *testing.T) {
 	typeLen := quicvarint.Len(uint64(FrameTypeMCFlow))
 	parsed, _, err := parseMCFlowFrame(b[typeLen:], protocol.Version1)
 	require.NoError(t, err)
+	require.Equal(t, frame.SourceAddress, parsed.SourceAddress)
 	require.Equal(t, frame.GroupAddress, parsed.GroupAddress)
 }
 
@@ -278,7 +280,7 @@ func TestMCFlowFrameAllowsIPv6ASMGroups(t *testing.T) {
 			frame := &MCFlowFrame{
 				FlowID:            protocol.ParseConnectionID([]byte{0xde, 0xad, 0xbe, 0xef}),
 				IPVersion:         6,
-				SourceAddress:     netip.MustParseAddr("2001:67c:1232:6004::1"),
+				SourceAddress:     netip.IPv6Unspecified(),
 				GroupAddress:      netip.MustParseAddr(group),
 				UDPPort:           4434,
 				CipherSuite:       0x1301,

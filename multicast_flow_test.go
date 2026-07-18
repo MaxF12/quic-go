@@ -60,14 +60,14 @@ func TestMulticastFlowLifecycleAndDatagramDelivery(t *testing.T) {
 }
 
 func TestASMMulticastFlowLifecycleAndDatagramDelivery(t *testing.T) {
-	testMulticastFlowLifecycleAndDatagramDelivery(t, 4, "192.0.2.1", "239.192.74.99")
+	testMulticastFlowLifecycleAndDatagramDelivery(t, 4, "0.0.0.0", "239.192.74.99")
 }
 
 func TestIPv6ASMMulticastFlowLifecycleAndDatagramDelivery(t *testing.T) {
 	testMulticastFlowLifecycleAndDatagramDelivery(
 		t,
 		6,
-		"2001:67c:1232:6004:c78:6140:6e37:69ce",
+		"::",
 		"ff3e:30:3ffe:ffff:1::4",
 	)
 }

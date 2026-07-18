@@ -54,7 +54,7 @@ func newNativeIPv4MulticastReceiver(
 	interfaceName string,
 	debugf multicastDebugFunc,
 ) (multicastReceiver, error) {
-	iface, interfaceAddress, err := selectIPv4MulticastInterface(source, interfaceName)
+	iface, interfaceAddress, err := selectIPv4MulticastInterface(source, group, interfaceName)
 	if err != nil {
 		debugf.logf("IPv4 interface selection failed: %v", err)
 		return nil, err
@@ -64,12 +64,13 @@ func newNativeIPv4MulticastReceiver(
 		selection = "explicit"
 	}
 	debugf.logf(
-		"selected IPv4 interface mode=%s name=%q index=%d local=%s source_hint=%s",
+		"selected IPv4 interface mode=%s name=%q index=%d local=%s source_hint=%s route_hint=%s",
 		selection,
 		iface.Name,
 		iface.Index,
 		interfaceAddress,
 		source,
+		multicastInterfaceRouteTarget(source, group),
 	)
 
 	listenConfig := net.ListenConfig{

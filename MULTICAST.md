@@ -50,9 +50,11 @@ the leading `ff3e`. Use an explicit interface for scoped IPv6 when route
 selection would be ambiguous.
 
 This is an extension of the original SSM-only PoC profile and does not change
-the `MC_FLOW` encoding. For ASM, the advertised source address is used as the
-default interface-route hint, but group membership and packet filtering accept
-any usable source of the same IP family.
+the `MC_FLOW` encoding. For ASM, the advertised source address may be the
+unspecified address (`0.0.0.0` or `::`) to mean any source. A usable advertised
+source is the default interface-route hint; when it is unspecified, the group
+address is used instead. Group membership and packet filtering accept any
+usable source of the same IP family.
 Only packets that authenticate with the flow secret are delivered, but
 unauthenticated ASM traffic can still consume sustained receive and
 cryptographic processing capacity; only queued memory is bounded.
@@ -78,6 +80,26 @@ go run ./example/multicast-client -insecure -interface en0 \
 
 By default it prints one hexadecimal DATAGRAM payload per line. Pass `-raw` to
 write payload bytes directly.
+
+To display RTP/H.264 carried one RTP packet per DATAGRAM, install FFmpeg and
+pass `-display`:
+
+```sh
+go run ./example/multicast-client -display -debug -insecure \
+  '[2001:67c:1232:6004:c78:6140:6e37:69ce]:4434'
+```
+
+Display mode validates RTP version 2 and payload type 96, then forwards each
+packet unchanged over loopback UDP to `ffplay`. The generated SDP describes
+`H264/90000` with packetization mode 1. FFmpeg provides RTP reordering with a
+100 ms jitter budget, H.264 depacketization and decoding, and the video window.
+It also enables a two-second unicast QUIC keepalive because multicast packets
+do not refresh the connection's idle timeout.
+
+Use `-rtp-payload-type` for a mapping other than 96 and `-ffplay` to select a
+different executable. If the stream does not send SPS and PPS NAL units
+in-band, copy the comma-separated base64 value from SDP
+`sprop-parameter-sets` into `-h264-sprop-parameter-sets`.
 
 This is a lab PoC. All receivers share one traffic secret and can therefore
 forge packets accepted by other receivers. It is not suitable for production.

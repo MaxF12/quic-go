@@ -117,8 +117,8 @@ func (f *MCFlowFrame) validate() error {
 			return errors.New("IPv4 flow requires IPv4 source and group addresses")
 		}
 		source := f.SourceAddress.As4()
-		if f.SourceAddress.IsUnspecified() ||
-			f.SourceAddress.IsMulticast() ||
+		if f.SourceAddress.IsMulticast() ||
+			f.SourceAddress.IsUnspecified() && isIPv4SSMGroup(f.GroupAddress) ||
 			source == [4]byte{255, 255, 255, 255} {
 			return fmt.Errorf("invalid IPv4 multicast source address: %s", f.SourceAddress)
 		}
@@ -127,7 +127,8 @@ func (f *MCFlowFrame) validate() error {
 			!f.GroupAddress.Is6() || f.GroupAddress.Is4In6() {
 			return errors.New("IPv6 flow requires IPv6 source and group addresses")
 		}
-		if f.SourceAddress.IsUnspecified() || f.SourceAddress.IsMulticast() {
+		if f.SourceAddress.IsMulticast() ||
+			f.SourceAddress.IsUnspecified() && isIPv6SSMGroup(f.GroupAddress) {
 			return fmt.Errorf("invalid IPv6 multicast source address: %s", f.SourceAddress)
 		}
 	default:
@@ -203,6 +204,11 @@ func isSupportedMulticastGroup(addr netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+func isIPv4SSMGroup(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	return addr.Is4() && addr.As4()[0] == 232
 }
 
 func isIPv6SSMGroup(addr netip.Addr) bool {

@@ -36,7 +36,7 @@ func newNativeIPv6MulticastReceiver(
 	interfaceName string,
 	debugf multicastDebugFunc,
 ) (multicastReceiver, error) {
-	iface, localAddress, err := selectIPv6MulticastInterface(source, interfaceName)
+	iface, localAddress, err := selectIPv6MulticastInterface(source, group, interfaceName)
 	if err != nil {
 		debugf.logf("IPv6 interface selection failed: %v", err)
 		return nil, err
@@ -50,12 +50,13 @@ func newNativeIPv6MulticastReceiver(
 		local = localAddress.String()
 	}
 	debugf.logf(
-		"selected IPv6 interface mode=%s name=%q index=%d local=%s source_hint=%s",
+		"selected IPv6 interface mode=%s name=%q index=%d local=%s source_hint=%s route_hint=%s",
 		selection,
 		iface.Name,
 		iface.Index,
 		local,
 		source,
+		multicastInterfaceRouteTarget(source, group),
 	)
 
 	listenConfig := net.ListenConfig{
