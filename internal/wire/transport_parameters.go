@@ -54,6 +54,8 @@ const (
 	legacyResetStreamAtParameterID transportParameterID = 0x17f7586d2cb571
 	// https://datatracker.ietf.org/doc/draft-ietf-quic-ack-frequency/11/
 	minAckDelayParameterID transportParameterID = 0xff04de1b
+	// Experimental multicast QUIC support.
+	multicastSupportParameterID transportParameterID = 0xff4d40
 )
 
 // PreferredAddress is the value encoding in the preferred_address transport parameter
@@ -93,6 +95,7 @@ type TransportParameters struct {
 
 	MaxDatagramFrameSize protocol.ByteCount // RFC 9221
 	EnableResetStreamAt  bool               // https://datatracker.ietf.org/doc/draft-ietf-quic-reliable-stream-reset/09/
+	EnableMulticast      bool
 	MinAckDelay          *time.Duration
 }
 
@@ -214,6 +217,11 @@ func (p *TransportParameters) unmarshal(b []byte, sentBy protocol.Perspective, f
 				return fmt.Errorf("wrong length for reset_stream_at: %d (expected empty)", paramLen)
 			}
 			p.EnableResetStreamAt = true
+		case multicastSupportParameterID:
+			if paramLen != 0 {
+				return fmt.Errorf("wrong length for multicast_support: %d (expected empty)", paramLen)
+			}
+			p.EnableMulticast = true
 		default:
 			if fromSessionTicket {
 				// A ticket might contain a parameter for an extension supported by an older
@@ -459,6 +467,10 @@ func (p *TransportParameters) Marshal(pers protocol.Perspective) []byte {
 		b = quicvarint.Append(b, uint64(resetStreamAtParameterID))
 		b = quicvarint.Append(b, 0)
 	}
+	if pers == protocol.PerspectiveClient && p.EnableMulticast {
+		b = quicvarint.Append(b, uint64(multicastSupportParameterID))
+		b = quicvarint.Append(b, 0)
+	}
 	if p.MinAckDelay != nil {
 		b = p.marshalVarintParam(b, minAckDelayParameterID, uint64(*p.MinAckDelay/time.Microsecond))
 	}
@@ -584,6 +596,8 @@ func (p *TransportParameters) String() string {
 	}
 	logString += ", EnableResetStreamAt: %t"
 	logParams = append(logParams, p.EnableResetStreamAt)
+	logString += ", EnableMulticast: %t"
+	logParams = append(logParams, p.EnableMulticast)
 	if p.MinAckDelay != nil {
 		logString += ", MinAckDelay: %s"
 		logParams = append(logParams, *p.MinAckDelay)

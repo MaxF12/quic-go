@@ -90,7 +90,8 @@ func (h *datagramQueue) Pop() {
 }
 
 // HandleDatagramFrame handles a received DATAGRAM frame.
-func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
+// It reports whether the frame was queued for application delivery.
+func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) bool {
 	data := make([]byte, len(f.Data))
 	copy(data, f.Data)
 	var queued bool
@@ -107,6 +108,7 @@ func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 	if !queued && h.logger.Debug() {
 		h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
 	}
+	return queued
 }
 
 // Receive gets a received DATAGRAM frame.

@@ -75,6 +75,19 @@ type DatagramFrame struct {
 	Length int64
 }
 
+// A MulticastFlowFrame is an experimental MC_FLOW frame.
+// It deliberately contains only metadata and never the traffic secret.
+type MulticastFlowFrame struct {
+	FlowID            string
+	IPVersion         uint8
+	SourceAddress     string
+	GroupAddress      string
+	UDPPort           uint16
+	CipherSuite       uint16
+	FirstPacketNumber int64
+	SecretLength      int
+}
+
 func (fs frames) encode(enc *jsontext.Encoder) error {
 	h := encoderHelper{enc: enc}
 	h.WriteToken(jsontext.BeginArray)
@@ -133,6 +146,8 @@ func (f Frame) Encode(enc *jsontext.Encoder) error {
 		return encodeAckFrequencyFrame(enc, frame)
 	case *ImmediateAckFrame:
 		return encodeImmediateAckFrame(enc, frame)
+	case *MulticastFlowFrame:
+		return encodeMulticastFlowFrame(enc, frame)
 	default:
 		panic("unknown frame type")
 	}
@@ -450,6 +465,31 @@ func encodeDatagramFrame(enc *jsontext.Encoder, f *DatagramFrame) error {
 	h.WriteToken(jsontext.String("datagram"))
 	h.WriteToken(jsontext.String("length"))
 	h.WriteToken(jsontext.Int(f.Length))
+	h.WriteToken(jsontext.EndObject)
+	return h.err
+}
+
+func encodeMulticastFlowFrame(enc *jsontext.Encoder, f *MulticastFlowFrame) error {
+	h := encoderHelper{enc: enc}
+	h.WriteToken(jsontext.BeginObject)
+	h.WriteToken(jsontext.String("frame_type"))
+	h.WriteToken(jsontext.String("mc_flow"))
+	h.WriteToken(jsontext.String("flow_id"))
+	h.WriteToken(jsontext.String(f.FlowID))
+	h.WriteToken(jsontext.String("ip_version"))
+	h.WriteToken(jsontext.Uint(uint64(f.IPVersion)))
+	h.WriteToken(jsontext.String("source_address"))
+	h.WriteToken(jsontext.String(f.SourceAddress))
+	h.WriteToken(jsontext.String("group_address"))
+	h.WriteToken(jsontext.String(f.GroupAddress))
+	h.WriteToken(jsontext.String("udp_port"))
+	h.WriteToken(jsontext.Uint(uint64(f.UDPPort)))
+	h.WriteToken(jsontext.String("cipher_suite"))
+	h.WriteToken(jsontext.Uint(uint64(f.CipherSuite)))
+	h.WriteToken(jsontext.String("first_packet_number"))
+	h.WriteToken(jsontext.Int(f.FirstPacketNumber))
+	h.WriteToken(jsontext.String("secret_length"))
+	h.WriteToken(jsontext.Int(int64(f.SecretLength)))
 	h.WriteToken(jsontext.EndObject)
 	return h.err
 }

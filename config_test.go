@@ -118,6 +118,10 @@ func configWithNonZeroNonFunctionFields(t *testing.T) *Config {
 			f.Set(reflect.ValueOf(time.Second))
 		case "EnableDatagrams":
 			f.Set(reflect.ValueOf(true))
+		case "EnableMulticast":
+			f.Set(reflect.ValueOf(true))
+		case "MulticastInterface":
+			f.Set(reflect.ValueOf("en0"))
 		case "DisableVersionNegotiationPackets":
 			f.Set(reflect.ValueOf(true))
 		case "InitialPacketSize":
@@ -196,4 +200,10 @@ func TestConfigZeroLimits(t *testing.T) {
 	c := populateConfig(config)
 	require.Zero(t, c.MaxIncomingStreams)
 	require.Zero(t, c.MaxIncomingUniStreams)
+}
+
+func TestMulticastEnablesDatagrams(t *testing.T) {
+	c := populateConfig(&Config{EnableMulticast: true})
+	require.True(t, c.EnableMulticast)
+	require.True(t, c.EnableDatagrams)
 }

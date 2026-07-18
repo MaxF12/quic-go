@@ -175,6 +175,13 @@ type Config struct {
 	Allow0RTT bool
 	// Enable QUIC datagram support (RFC 9221).
 	EnableDatagrams bool
+	// EnableMulticast enables the experimental minimal multicast QUIC receive extension.
+	// It is only supported for clients and implicitly enables QUIC datagram support.
+	EnableMulticast bool
+	// MulticastInterface is the name of the network interface used for multicast
+	// subscriptions. If empty, the interface is selected from the route to the
+	// multicast source.
+	MulticastInterface string
 	// Enable QUIC Stream Resets with Partial Delivery.
 	// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset-09.
 	EnableStreamResetPartialDelivery bool

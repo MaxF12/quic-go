@@ -52,9 +52,10 @@ func TestTransportParametersStringRepresentation(t *testing.T) {
 		ActiveConnectionIDLimit:         123,
 		MaxDatagramFrameSize:            876,
 		EnableResetStreamAt:             true,
+		EnableMulticast:                 true,
 		MinAckDelay:                     &minAckDelay,
 	}
-	expected := "&wire.TransportParameters{OriginalDestinationConnectionID: deadbeef, InitialSourceConnectionID: decafbad, RetrySourceConnectionID: deadc0de, InitialMaxStreamDataBidiLocal: 1234, InitialMaxStreamDataBidiRemote: 2345, InitialMaxStreamDataUni: 3456, InitialMaxData: 4567, MaxBidiStreamNum: 1337, MaxUniStreamNum: 7331, MaxIdleTimeout: 42s, AckDelayExponent: 14, MaxAckDelay: 37ms, ActiveConnectionIDLimit: 123, StatelessResetToken: 0x112233445566778899aabbccddeeff00, MaxDatagramFrameSize: 876, EnableResetStreamAt: true, MinAckDelay: 42ms}"
+	expected := "&wire.TransportParameters{OriginalDestinationConnectionID: deadbeef, InitialSourceConnectionID: decafbad, RetrySourceConnectionID: deadc0de, InitialMaxStreamDataBidiLocal: 1234, InitialMaxStreamDataBidiRemote: 2345, InitialMaxStreamDataUni: 3456, InitialMaxData: 4567, MaxBidiStreamNum: 1337, MaxUniStreamNum: 7331, MaxIdleTimeout: 42s, AckDelayExponent: 14, MaxAckDelay: 37ms, ActiveConnectionIDLimit: 123, StatelessResetToken: 0x112233445566778899aabbccddeeff00, MaxDatagramFrameSize: 876, EnableResetStreamAt: true, EnableMulticast: true, MinAckDelay: 42ms}"
 	require.Equal(t, expected, p.String())
 }
 
@@ -74,7 +75,7 @@ func TestTransportParametersStringRepresentationWithoutOptionalFields(t *testing
 		ActiveConnectionIDLimit:         89,
 		MaxDatagramFrameSize:            protocol.InvalidByteCount,
 	}
-	expected := "&wire.TransportParameters{OriginalDestinationConnectionID: deadbeef, InitialSourceConnectionID: (empty), InitialMaxStreamDataBidiLocal: 1234, InitialMaxStreamDataBidiRemote: 2345, InitialMaxStreamDataUni: 3456, InitialMaxData: 4567, MaxBidiStreamNum: 1337, MaxUniStreamNum: 7331, MaxIdleTimeout: 42s, AckDelayExponent: 14, MaxAckDelay: 37s, ActiveConnectionIDLimit: 89, EnableResetStreamAt: false}"
+	expected := "&wire.TransportParameters{OriginalDestinationConnectionID: deadbeef, InitialSourceConnectionID: (empty), InitialMaxStreamDataBidiLocal: 1234, InitialMaxStreamDataBidiRemote: 2345, InitialMaxStreamDataUni: 3456, InitialMaxData: 4567, MaxBidiStreamNum: 1337, MaxUniStreamNum: 7331, MaxIdleTimeout: 42s, AckDelayExponent: 14, MaxAckDelay: 37s, ActiveConnectionIDLimit: 89, EnableResetStreamAt: false, EnableMulticast: false}"
 	require.Equal(t, expected, p.String())
 }
 
@@ -152,6 +153,41 @@ func TestResetStreamAtTransportParameterCodepoints(t *testing.T) {
 			require.True(t, p.EnableResetStreamAt)
 		})
 	}
+}
+
+func TestMulticastSupportTransportParameter(t *testing.T) {
+	param := quicvarint.Append(nil, uint64(multicastSupportParameterID))
+	param = quicvarint.Append(param, 0)
+
+	params := &TransportParameters{
+		ActiveConnectionIDLimit: protocol.DefaultActiveConnectionIDLimit,
+		EnableMulticast:         true,
+	}
+	clientData := params.Marshal(protocol.PerspectiveClient)
+	require.True(t, bytes.Contains(clientData, param))
+	serverData := params.Marshal(protocol.PerspectiveServer)
+	require.False(t, bytes.Contains(serverData, param))
+
+	var parsed TransportParameters
+	require.NoError(t, parsed.Unmarshal(clientData, protocol.PerspectiveClient))
+	require.True(t, parsed.EnableMulticast)
+
+	parsed = TransportParameters{}
+	require.NoError(t, parsed.Unmarshal(serverData, protocol.PerspectiveServer))
+	require.False(t, parsed.EnableMulticast)
+}
+
+func TestMulticastSupportTransportParameterRequiresZeroLength(t *testing.T) {
+	b := quicvarint.Append(nil, uint64(multicastSupportParameterID))
+	b = quicvarint.Append(b, 1)
+	b = append(b, 0)
+	b = appendInitialSourceConnectionID(b)
+
+	err := (&TransportParameters{}).Unmarshal(b, protocol.PerspectiveClient)
+	var transportErr *qerr.TransportError
+	require.ErrorAs(t, err, &transportErr)
+	require.Equal(t, qerr.TransportParameterError, transportErr.ErrorCode)
+	require.Equal(t, "wrong length for multicast_support: 1 (expected empty)", transportErr.ErrorMessage)
 }
 
 func TestMarshalAdditionalTransportParameters(t *testing.T) {

@@ -68,6 +68,19 @@ func LogFrame(logger utils.Logger, frame Frame, sent bool) {
 		logger.Debugf("\t%s &wire.RetireConnectionIDFrame{SequenceNumber: %d}", dir, f.SequenceNumber)
 	case *NewTokenFrame:
 		logger.Debugf("\t%s &wire.NewTokenFrame{Token: %#x}", dir, f.Token)
+	case *MCFlowFrame:
+		logger.Debugf(
+			"\t%s &wire.MCFlowFrame{FlowID: %s, IPVersion: %d, SourceAddress: %s, GroupAddress: %s, UDPPort: %d, CipherSuite: %#x, FirstPacketNumber: %d, Secret length: %d}",
+			dir,
+			f.FlowID,
+			f.IPVersion,
+			f.SourceAddress,
+			f.GroupAddress,
+			f.UDPPort,
+			f.CipherSuite,
+			f.FirstPacketNumber,
+			len(f.Secret),
+		)
 	default:
 		logger.Debugf("\t%s %#v", dir, frame)
 	}

@@ -50,6 +50,7 @@ type receivedPacket struct {
 	remoteAddr net.Addr
 	rcvTime    monotime.Time
 	data       []byte
+	multicast  bool
 
 	ecn protocol.ECN
 
@@ -71,6 +72,7 @@ func (p *receivedPacket) Clone() *receivedPacket {
 		buffer:     p.buffer,
 		ecn:        p.ecn,
 		info:       p.info,
+		multicast:  p.multicast,
 	}
 }
 
@@ -175,6 +177,7 @@ type Conn struct {
 	sendingScheduled     chan struct{}
 	receivedPacketMx     sync.Mutex
 	receivedPackets      ringbuffer.RingBuffer[receivedPacket]
+	multicastPackets     ringbuffer.RingBuffer[receivedPacket]
 
 	// closeChan is used to notify the run loop that it should terminate
 	closeChan chan struct{}
@@ -218,6 +221,7 @@ type Conn struct {
 	keepAliveInterval time.Duration
 
 	datagramQueue *datagramQueue
+	multicastFlow *multicastFlow
 
 	connStateMutex sync.Mutex
 	connState      ConnectionState
@@ -471,6 +475,7 @@ var newClientConnection = func(
 		ActiveConnectionIDLimit:   protocol.MaxActiveConnectionIDs,
 		InitialSourceConnectionID: srcConnID,
 		EnableResetStreamAt:       conf.EnableStreamResetPartialDelivery,
+		EnableMulticast:           conf.EnableMulticast,
 	}
 	if s.config.EnableDatagrams {
 		params.MaxDatagramFrameSize = wire.MaxDatagramSize
@@ -544,6 +549,7 @@ func (c *Conn) preSetup() {
 	)
 	c.framer = newFramer(c.connFlowController)
 	c.receivedPackets.Init(8)
+	c.multicastPackets.Init(8)
 	c.notifyReceivedPacket = make(chan struct{}, 1)
 	c.closeChan = make(chan struct{}, 1)
 	c.sendingScheduled = make(chan struct{}, 1)
@@ -573,7 +579,13 @@ func (c *Conn) run() (err error) {
 			p.buffer.Decrement()
 			p.buffer.MaybeRelease()
 		}
+		for !c.multicastPackets.Empty() {
+			p := c.multicastPackets.PopFront()
+			p.buffer.Decrement()
+			p.buffer.MaybeRelease()
+		}
 	}()
+	defer c.closeMulticastFlow()
 
 	c.timer = time.NewTimer(monotime.Until(c.idleTimeoutStartTime().Add(c.config.HandshakeIdleTimeout)))
 
@@ -744,6 +756,9 @@ runLoop:
 	c.cryptoStreamHandler.Close()
 	c.sendQueue.Close() // close the send queue before sending the CONNECTION_CLOSE
 	c.handleCloseError(closeErr)
+	// Stop multicast receive before closing the qlog recorder. The multicast
+	// receiver can emit final diagnostic events while it is being shut down.
+	c.closeMulticastFlow()
 	if c.qlogger != nil {
 		if e := (&errCloseForRecreating{}); !errors.As(closeErr.err, &e) {
 			c.qlogger.Close()
@@ -1005,14 +1020,19 @@ func (c *Conn) handlePackets() (wasProcessed bool, _ error) {
 	// so we eventually get a chance to send out an ACK when receiving a lot of packets.
 	c.receivedPacketMx.Lock()
 
-	if c.receivedPackets.Empty() {
+	if c.receivedPackets.Empty() && c.multicastPackets.Empty() {
 		c.receivedPacketMx.Unlock()
 		return false, nil
 	}
 
 	var hasMorePackets bool
 	for range maxPacketsToProcess {
-		p := c.receivedPackets.PopFront()
+		var p receivedPacket
+		if !c.receivedPackets.Empty() {
+			p = c.receivedPackets.PopFront()
+		} else {
+			p = c.multicastPackets.PopFront()
+		}
 		c.receivedPacketMx.Unlock()
 
 		var datagramID qlog.DatagramID
@@ -1027,7 +1047,7 @@ func (c *Conn) handlePackets() (wasProcessed bool, _ error) {
 			wasProcessed = true
 		}
 		c.receivedPacketMx.Lock()
-		hasMorePackets = !c.receivedPackets.Empty()
+		hasMorePackets = !c.receivedPackets.Empty() || !c.multicastPackets.Empty()
 		if !hasMorePackets {
 			break
 		}
@@ -1049,6 +1069,10 @@ func (c *Conn) handlePackets() (wasProcessed bool, _ error) {
 }
 
 func (c *Conn) handleOnePacket(rp receivedPacket, datagramID qlog.DatagramID) (wasProcessed bool, _ error) {
+	if rp.multicast {
+		c.handleMulticastPacket(rp)
+		return true, nil
+	}
 	c.sentPacketHandler.ReceivedBytes(rp.Size(), rp.rcvTime)
 
 	if wire.IsVersionNegotiationPacket(rp.data) {
@@ -1942,6 +1966,8 @@ func (c *Conn) handleFrame(
 		err = c.connIDGenerator.Retire(frame.SequenceNumber, destConnID, rcvTime.Add(3*c.rttStats.PTO(false)))
 	case *wire.HandshakeDoneFrame:
 		err = c.handleHandshakeDoneFrame(rcvTime)
+	case *wire.MCFlowFrame:
+		err = c.handleMCFlowFrame(frame)
 	default:
 		err = fmt.Errorf("unexpected frame type: %s", reflect.ValueOf(&frame).Elem().Type().Name())
 	}

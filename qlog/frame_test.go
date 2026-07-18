@@ -26,6 +26,32 @@ func TestPingFrame(t *testing.T) {
 	check(t, &PingFrame{}, map[string]any{"frame_type": "ping"})
 }
 
+func TestMulticastFlowFrame(t *testing.T) {
+	check(t,
+		&MulticastFlowFrame{
+			FlowID:            "deadbeef",
+			IPVersion:         4,
+			SourceAddress:     "192.0.2.1",
+			GroupAddress:      "232.1.1.1",
+			UDPPort:           5000,
+			CipherSuite:       0x1301,
+			FirstPacketNumber: 42,
+			SecretLength:      32,
+		},
+		map[string]any{
+			"frame_type":          "mc_flow",
+			"flow_id":             "deadbeef",
+			"ip_version":          4,
+			"source_address":      "192.0.2.1",
+			"group_address":       "232.1.1.1",
+			"udp_port":            5000,
+			"cipher_suite":        0x1301,
+			"first_packet_number": 42,
+			"secret_length":       32,
+		},
+	)
+}
+
 func TestAckFrame(t *testing.T) {
 	tests := []struct {
 		name     string

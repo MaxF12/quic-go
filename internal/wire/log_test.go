@@ -2,6 +2,7 @@ package wire
 
 import (
 	"bytes"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -185,4 +186,21 @@ func TestLogNewTokenFrame(t *testing.T) {
 		Token: []byte{0xde, 0xad, 0xbe, 0xef},
 	}, true)
 	require.Contains(t, buf.String(), "\t-> &wire.NewTokenFrame{Token: 0xdeadbeef")
+}
+
+func TestLogMCFlowFrameRedactsSecret(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := setupLogTest(t, buf)
+	LogFrame(logger, &MCFlowFrame{
+		FlowID:            protocol.ParseConnectionID([]byte{0xde, 0xad, 0xbe, 0xef}),
+		IPVersion:         4,
+		SourceAddress:     netip.MustParseAddr("192.0.2.1"),
+		GroupAddress:      netip.MustParseAddr("232.1.2.3"),
+		UDPPort:           5000,
+		CipherSuite:       0x1301,
+		FirstPacketNumber: 42,
+		Secret:            []byte("definitely-not-for-logs"),
+	}, false)
+	require.Contains(t, buf.String(), "Secret length: 23")
+	require.NotContains(t, buf.String(), "definitely-not-for-logs")
 }

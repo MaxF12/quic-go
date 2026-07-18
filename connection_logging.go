@@ -41,6 +41,19 @@ func toQlogFrame(frame wire.Frame) qlog.Frame {
 				Length: int64(len(f.Data)),
 			},
 		}
+	case *wire.MCFlowFrame:
+		return qlog.Frame{
+			Frame: &qlog.MulticastFlowFrame{
+				FlowID:            f.FlowID.String(),
+				IPVersion:         f.IPVersion,
+				SourceAddress:     f.SourceAddress.String(),
+				GroupAddress:      f.GroupAddress.String(),
+				UDPPort:           f.UDPPort,
+				CipherSuite:       f.CipherSuite,
+				FirstPacketNumber: int64(f.FirstPacketNumber),
+				SecretLength:      len(f.Secret),
+			},
+		}
 	default:
 		return qlog.Frame{Frame: frame}
 	}

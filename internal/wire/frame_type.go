@@ -38,6 +38,9 @@ const (
 
 	FrameTypeDatagramNoLength   FrameType = 0x30
 	FrameTypeDatagramWithLength FrameType = 0x31
+
+	// Experimental multicast QUIC flow announcement.
+	FrameTypeMCFlow FrameType = 0xff4d43
 )
 
 func (t FrameType) IsStreamFrameType() bool {
@@ -68,7 +71,7 @@ func (t FrameType) isAllowedAtEncLevel(encLevel protocol.EncryptionLevel) bool {
 		}
 	case protocol.Encryption0RTT:
 		switch t {
-		case FrameTypeCrypto, FrameTypeAck, FrameTypeAckECN, FrameTypeConnectionClose, FrameTypeNewToken, FrameTypePathResponse, FrameTypeRetireConnectionID:
+		case FrameTypeCrypto, FrameTypeAck, FrameTypeAckECN, FrameTypeConnectionClose, FrameTypeNewToken, FrameTypePathResponse, FrameTypeRetireConnectionID, FrameTypeMCFlow:
 			return false
 		default:
 			return true
